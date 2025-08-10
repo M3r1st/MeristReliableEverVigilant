@@ -1,12 +1,18 @@
 class X2Ability_ReliableEverVigilant extends X2Ability config(Game);
 
+struct OverwatchAbilityInfo
+{
+    var name AbilityName;
+    var int Priority;
+};
+
 var privatewrite name REVAbilityName;
 var privatewrite name REVCounterName;
 
 var config array<name> EverVigilantIgnore;
 var config array<name> EverVigilantStopOnAbility;
 
-var config array<name> OverwatchAbilities;
+var config array<OverwatchAbilityInfo> OverwatchAbilities;
 
 var config int EventPriority;
 

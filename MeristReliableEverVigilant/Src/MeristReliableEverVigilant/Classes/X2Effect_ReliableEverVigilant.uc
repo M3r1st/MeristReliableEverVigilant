@@ -48,7 +48,7 @@ static function EventListenerReturn ReliableEverVigilant_AbilityListener(Object 
         || AbilityState.IsAbilityInputTriggered() && AbilityState.GetMyTemplate().Hostility != eHostility_Movement
         && class'X2Ability_ReliableEverVigilant'.default.EverVigilantIgnore.Find(AbilityState.GetMyTemplateName()) == INDEX_NONE)
     {
-        `LOG("Updating Ever Vigilant counter", class'X2Ability_ReliableEverVigilant'.default.bLog, GetFuncName());
+        `LOG(AbilityState.GetMyTemplateName() $ " is not a valid ability. Updating Ever Vigilant counter", class'X2Ability_ReliableEverVigilant'.default.bLog, GetFuncName());
         NewGameState = class'XComGameStateContext_ChangeContainer'.static.CreateChangeState(string(GetFuncName()));
         UnitState = XComGameState_Unit(NewGameState.ModifyStateObject(UnitState.Class, UnitState.ObjectID));
         UnitState.GetUnitValue(class'X2Ability_ReliableEverVigilant'.default.REVCounterName, UnitValue);
@@ -68,6 +68,8 @@ static function EventListenerReturn ReliableEverVigilant_TurnEndListener(Object 
 
     local StateObjectReference          OverwatchRef;
     local XComGameState_Ability         OverwatchState;
+    local OverwatchAbilityInfo          OverwatchAbilityInfo;
+    local array<OverwatchAbilityInfo>   OverwatchAbilitiesSorted;
     local name                          OverwatchAbilityName;
     local bool                          bCanUseOverwatch;
     local X2AbilityCost                 Cost;
@@ -75,6 +77,9 @@ static function EventListenerReturn ReliableEverVigilant_TurnEndListener(Object 
     local XComGameState                 NewGameState;
     local EffectAppliedData             ApplyData;
     local X2Effect                      VigilantEffect;
+    local name                          ActionPointType;
+    local int                           iNumPoints;
+    local int                           Index;
 
     History = `XCOMHISTORY;
 
@@ -86,13 +91,20 @@ static function EventListenerReturn ReliableEverVigilant_TurnEndListener(Object 
             UnitState = XComGameState_Unit(History.GetGameStateForObjectID(EffectState.ApplyEffectParameters.TargetStateObjectRef.ObjectID));
         if (UnitState != none)
         {
-            if (UnitState.GetUnitValue(class'X2Ability_ReliableEverVigilant'.default.REVCounterName, UnitValue) && UnitValue.fValue == 0)
+            if (!UnitState.GetUnitValue(class'X2Ability_ReliableEverVigilant'.default.REVCounterName, UnitValue) || UnitValue.fValue == 0)
             {
                 if (UnitState.NumAllReserveActionPoints() == 0)
                 {
                     `LOG("Can activate Ever Vigilant", class'X2Ability_ReliableEverVigilant'.default.bLog, GetFuncName());
-                    foreach class'X2Ability_ReliableEverVigilant'.default.OverwatchAbilities(OverwatchAbilityName)
+                    foreach class'X2Ability_ReliableEverVigilant'.default.OverwatchAbilities(OverwatchAbilityInfo)
                     {
+                        OverwatchAbilitiesSorted.AddItem(OverwatchAbilityInfo);
+                    }
+                    OverwatchAbilitiesSorted.Sort(SortOverwatchAbilities);
+
+                    foreach OverwatchAbilitiesSorted(OverwatchAbilityInfo)
+                    {
+                        OverwatchAbilityName = OverwatchAbilityInfo.AbilityName;
                         OverwatchRef = UnitState.FindAbility(OverwatchAbilityName);
                         if (OverwatchRef.ObjectID != 0)
                         {
@@ -138,11 +150,26 @@ static function EventListenerReturn ReliableEverVigilant_TurnEndListener(Object 
                         `assert(VigilantEffect != none);
                         VigilantEffect.ApplyEffect(ApplyData, UnitState, NewGameState);
 
-                        if (UnitState.NumActionPoints() == 0)
+                        if (GetAllowedActionPointType(OverwatchState, UnitState, ActionPointType, iNumPoints))
                         {
-                            `LOG("Adding an action point", class'X2Ability_ReliableEverVigilant'.default.bLog, GetFuncName());
-                            UnitState.ActionPoints.AddItem(class'X2CharacterTemplateManager'.default.StandardActionPoint);
+                            for (Index = 0; Index < iNumPoints; Index++)
+                            {
+                                if (OverwatchState.CanActivateAbility(UnitState) != 'AA_Success')
+                                {
+                                    UnitState.ActionPoints.AddItem(ActionPointType);
+                                }
+                                else
+                                {
+                                    break;
+                                }
+                            }
+
+                            if (Index > 0)
+                            {
+                                `LOG("Added " $ Index $ " points. Type: " $ ActionPointType, class'X2Ability_ReliableEverVigilant'.default.bLog, GetFuncName());
+                            }
                         }
+
                         UnitState.SetUnitFloatValue(class'X2Ability_SpecialistAbilitySet'.default.EverVigilantEffectName, 1, eCleanup_BeginTurn);
                             
                         `TACTICALRULES.SubmitGameState(NewGameState);
@@ -166,4 +193,61 @@ static function EventListenerReturn ReliableEverVigilant_TurnEndListener(Object 
     }
 
     return ELR_NoInterrupt;
+}
+
+static function bool GetAllowedActionPointType(XComGameState_Ability AbilityState, XComGameState_Unit UnitState, out name ActionPointType, out int iNumPoints, optional bool bReserve)
+{
+    local X2AbilityTemplate                     AbilityTemplate;
+    local X2AbilityCost                         AbilityCost;
+    local X2AbilityCost_ActionPoints            ActionPointCost;
+    local X2AbilityCost_ReserveActionPoints     ReserveActionPointCost;
+
+    AbilityTemplate = AbilityState.GetMyTemplate();
+
+    if (AbilityTemplate.AbilityCosts.Length > 0)
+    {
+        if (bReserve)
+        {
+            foreach AbilityTemplate.AbilityCosts(AbilityCost)
+            {
+                ReserveActionPointCost = X2AbilityCost_ReserveActionPoints(AbilityCost);
+                if (ReserveActionPointCost != none)
+                {
+                    if (ActionPointType == '')
+                        ActionPointType = ReserveActionPointCost.AllowedTypes[0];
+
+                    iNumPoints = Max(iNumPoints, ReserveActionPointCost.iNumPoints);
+                }
+            }
+        }
+        else
+        {
+            foreach AbilityTemplate.AbilityCosts(AbilityCost)
+            {
+                ActionPointCost = X2AbilityCost_ActionPoints(AbilityCost);
+                if (ActionPointCost != none)
+                {
+                    if (ActionPointType == '')
+                        ActionPointType = ActionPointCost.AllowedTypes[0];
+
+                    iNumPoints = Max(iNumPoints, ActionPointCost.GetPointCost(AbilityState, UnitState));
+                }
+            }
+        }
+    }
+
+    if (ActionPointType != '')
+        return true;
+
+    return false;
+}
+
+delegate int SortOverwatchAbilities(OverwatchAbilityInfo A, OverwatchAbilityInfo B)
+{
+    if (A.Priority < B.Priority)
+        return -1;
+    else if (A.Priority > B.Priority)
+        return 1;
+    else
+        return 0;
 }
