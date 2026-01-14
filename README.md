@@ -1,4 +1,5 @@
 # [WOTC] Reliable Ever Vigilant Redux
+Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3546124299
 
 ## What is this?
 Just like the previous incarnations, this mod stops Ever Vigilant from being invalidated by free neutral or uncontrollable actions.
